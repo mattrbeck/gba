@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>dinGBAt</title>
+
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+      name="viewport"
+    />
+    <link rel="stylesheet" type="text/css" href="styles.css" />
+
+    <!-- Only add if I can find a way to allow refreshes in the future. -->
+    <!-- <meta name="apple-mobile-web-app-capable" content="yes"> -->
+    <!-- <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"> -->
+    <link
+      rel="apple-touch-icon-precomposed"
+      href="apple-touch-icon-precomposed.png"
+    />
+  </head>
+
+  <body class="no-select">
+    <div id="external">
+      <button type="button" class="button" id="open-bios">Open BIOS</button>
+      <button type="button" class="button" id="open-rom">Open ROM</button>
+      <button type="button" class="button" id="show-log">Show Log</button>
+      <div id="fps"></div>
+    </div>
+
+    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+
+    <div id="log"></div>
+
+    <div id="controls">
+      <div id="lr">
+        <div id="l" keycode="87">LEFT</div>
+        <div id="r" keycode="82">RIGHT</div>
+      </div>
+
+      <div id="main-controls">
+        <div id="dpad">
+          <div id="upleft" keycodes="69 83"></div>
+          <div id="up" keycodes="69"></div>
+          <div id="upright" keycodes="69 70"></div>
+          <div id="left" keycodes="83"></div>
+          <div id="right" keycodes="70"></div>
+          <div id="downleft" keycodes="68 83"></div>
+          <div id="down" keycodes="68"></div>
+          <div id="downright" keycodes="68 70"></div>
+        </div>
+
+        <div id="ab">
+          <div id="a" keycode="75">A</div>
+          <div id="b" keycode="74">B</div>
+        </div>
+      </div>
+
+      <div id="select-start">
+        <div id="select" keycode="76">select</div>
+        <div id="start" keycode="186">start</div>
+      </div>
+    </div>
+
+    <script src="index.js"></script>
+    <script src="em.js"></script>
+  </body>
+</html>

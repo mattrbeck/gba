@@ -1,0 +1,192 @@
+/*
+ * ==========================================================
+ * Util
+ * ==========================================================
+ */
+
+:root {
+  --bg-color: #0e1621;
+  --alt-color: #17212b;
+  --fore-color: #182533;
+  --accent-color: #2b5278;
+  --text-color: #ffffff;
+}
+
+.no-select {
+  -webkit-touch-callout: none;
+  /* iOS Safari */
+  -webkit-user-select: none;
+  /* Safari */
+  -khtml-user-select: none;
+  /* Konqueror HTML */
+  -moz-user-select: none;
+  /* Old versions of Firefox */
+  -ms-user-select: none;
+  /* Internet Explorer/Edge */
+  user-select: none;
+  /* Non-prefixed version, currently supported by Chrome, Edge, Opera and Firefox */
+}
+
+/*
+ * ==========================================================
+ * Base
+ * ==========================================================
+ */
+
+body {
+  margin: 0;
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+  position: fixed;
+  touch-action: none;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+}
+
+#fps {
+  display: inline;
+}
+
+#canvas {
+  width: 960px;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 3 / 2;
+}
+
+#controls {
+  height: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: space-between;
+}
+
+#lr,
+#select-start {
+  width: 100%;
+  display: flex;
+  justify-content: space-evenly;
+  gap: 9px;
+  margin: 9px;
+}
+
+#lr > div,
+#select-start > div {
+  width: 100%;
+  height: 50px;
+  border: 1px solid var(--accent-color);
+}
+
+#lr,
+#select-start,
+#ab {
+  text-align: center;
+  text-transform: uppercase;
+  line-height: 50px;
+  color: var(--accent-color);
+}
+
+#main-controls {
+  margin: 9px;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+#main-controls > div {
+  margin: 1em;
+}
+
+#dpad {
+  width: 150px;
+  height: 150px;
+  display: grid;
+  grid-template-columns: 50px 50px 50px;
+  grid-template-rows: 50px 50px 50px;
+}
+
+#dpad > #up,
+#dpad > #left,
+#dpad > #right,
+#dpad > #down {
+  border: 1px solid var(--accent-color);
+}
+
+#dpad > #upleft {
+  grid-area: 1 / 1;
+}
+
+#dpad > #up {
+  grid-area: 1 / 2;
+  border-bottom: none;
+}
+
+#dpad > #upright {
+  grid-area: 1 / 3;
+}
+
+#dpad > #left {
+  grid-area: 2 / 1;
+  border-right: none;
+}
+
+#dpad > #right {
+  grid-area: 2 / 3;
+  border-left: none;
+}
+
+#dpad > #downleft {
+  grid-area: 3 / 1;
+}
+
+#dpad > #down {
+  grid-area: 3 / 2;
+  border-top: none;
+}
+
+#dpad > #downright {
+  grid-area: 3 / 3;
+}
+
+#ab {
+  display: flex;
+  width: 120px;
+  height: 150px;
+  position: relative;
+}
+
+#a,
+#b {
+  width: 50px;
+  height: 50px;
+  border-radius: 25px;
+  border: 1px solid var(--accent-color);
+  position: absolute;
+}
+
+#a {
+  top: 22%;
+  left: 50%;
+}
+
+#b {
+  top: 44%;
+  left: 0%;
+}
+
+#log {
+  position: absolute;
+  height: 250px;
+  width: 100vw;
+  top: 21px;
+  left: 0;
+  overflow: scroll;
+  line-height: 0;
+  color: black;
+  background-color: rgba(255, 255, 255, 0.5);
+}
