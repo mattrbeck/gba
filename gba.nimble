@@ -10,7 +10,7 @@ bin           = @["gba"]
 # Dependencies
 
 requires "nim >= 1.6.0"
-requires "sdl2 >= 2.0.4"
+requires "sdl2 >= 2.0.5"
 
 task wasm, "wasm":
   exec "nim c -d:emscripten -d:wasm -d:release src/gba.nim"
