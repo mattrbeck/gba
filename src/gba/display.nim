@@ -38,7 +38,7 @@ proc updateDrawCount(display: Display) =
     when defined(emscripten):
       emscripten_run_script(fmt"reportFps({fps:.2f})")
     else:
-      display.window.setTitle(fmt"gba - {fps:.2f}")
+      display.window.setTitle(cstring(fmt"gba - {fps:.2f}"))
     display.microseconds = 0
     display.frames = 0
     display.seconds = currentTime.second
