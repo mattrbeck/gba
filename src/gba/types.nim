@@ -37,6 +37,53 @@ type
 
   Save* = ref object
     gba*: GBA
+    storage*: Storage
+    romPath*: string
+    dirty*: bool
+
+  StorageType* = enum
+    None
+    SRAM
+    Flash64
+    Flash128
+    EEPROM
+
+  Storage* = ref object of RootObj
+    dirty*: bool
+
+  SRAMStorage* = ref object of Storage
+    memory*: array[0x8000, uint8]  # 32KB
+
+  FlashStorage* = ref object of Storage
+    memory*: seq[uint8]  # 64KB or 128KB
+    state*: FlashState
+    bank*: uint8
+    is128k*: bool
+
+  FlashState* = enum
+    FlashReady
+    FlashCmd1
+    FlashCmd2
+    FlashIdentification
+    FlashPrepareWrite
+    FlashPrepareErase
+    FlashSetBank
+
+  EEPROMStorage* = ref object of Storage
+    memory*: seq[uint8]
+    addressBits*: int  # 6 for 4K, 14 for 64K
+    buffer*: uint64
+    bufferSize*: int
+    state*: EEPROMState
+    address*: uint16
+    readBits*: int
+    writeBits*: int
+
+  EEPROMState* = enum
+    EEPROMReady
+    EEPROMAddress
+    EEPROMRead
+    EEPROMWrite
 
   CPU* = ref object
     gba*: GBA
@@ -94,6 +141,7 @@ type
     timer2
     timer3
     interrupt
+    saveWrite
 
   Mode* = enum
     usr = 0b10000

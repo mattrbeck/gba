@@ -14,7 +14,6 @@ proc newBus*(gba: GBA, biosPath, romPath: string): Bus =
   new result
   result.gba = gba
   result.mmio = newMMIO(gba)
-  result.save = newSave(gba)
   for i in 0 ..< result.rom.len:
     var oob = 0xFFFF and (i shr 1)
     result.rom[i] = uint8((oob shr (8 * (i and 1))))
@@ -25,6 +24,8 @@ proc newBus*(gba: GBA, biosPath, romPath: string): Bus =
   discard readBytes(romFile, result.rom, 0, len(result.rom))
   close(biosFile)
   close(romFile)
+  # Initialize save system after ROM is loaded (for auto-detection)
+  result.save = newSave(gba, romPath)
 
 # Increment the access cycle count for the cycles needed by this memory region.
 proc countCycles[T: uint8 | uint16 | uint32](page: SomeInteger) {.inline.} =

@@ -2,7 +2,15 @@ import os
 import sdl2
 import times
 
-import gba/[types, display, scheduler, bus, cpu, ppu, apu, dma, timer, serial, keypad, interrupts, util]
+import gba/[types, display, scheduler, bus, cpu, ppu, apu, dma, timer, serial, keypad, interrupts, util, save]
+
+proc scheduleSaveWrite(gba: GBA) =
+  # Schedule next save write (~60 times per second)
+  const saveInterval = 280896'u64  # cycles between saves
+  proc saveWriteCallback() =
+    writeSaveFile(gba.bus.save)
+    scheduleSaveWrite(gba)
+  gba.scheduler.schedule(saveInterval, saveWriteCallback, saveWrite)
 
 proc newGBA(bios, rom: string): GBA =
   new result
@@ -17,6 +25,8 @@ proc newGBA(bios, rom: string): GBA =
   result.serial = newSerial(result)
   result.keypad = newKeypad(result)
   result.interrupts = newInterrupts(result)
+  # Start periodic save writing
+  scheduleSaveWrite(result)
 
 when defined(emscripten):
   type em_arg_callback_func = proc(data: pointer) {.cdecl.}
