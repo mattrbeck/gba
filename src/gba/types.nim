@@ -18,10 +18,18 @@ type
 
   APU* = ref object
     gba*: GBA
-    channel1*: Channel
-
-  Channel* = ref object of RootObj
-    scheduler*: Scheduler
+    channel1*: RootRef  # Will be Channel1 from apu/channel1.nim
+    channel2*: RootRef  # Will be Channel2 from apu/channel2.nim
+    channel3*: RootRef  # Will be Channel3 from apu/channel3.nim
+    channel4*: RootRef  # Will be Channel4 from apu/channel4.nim
+    fifoA*: RootRef     # Will be FIFOChannel from apu/fifo.nim
+    fifoB*: RootRef     # Will be FIFOChannel from apu/fifo.nim
+    # Control registers
+    psgVolumeLeft*: int
+    psgVolumeRight*: int
+    psgVolume*: int
+    psgMasterEnable*: bool
+    soundBias*: uint16
 
   Bus* = ref object
     gba*: GBA
