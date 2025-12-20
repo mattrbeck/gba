@@ -196,14 +196,16 @@ proc renderAffineLayer(ppu; layer: SomeInteger) =
     else:
       layerBuffers[layer][col] = 0
 
-proc getPaletteIdx(ppu; sprite: Sprite, width, height, internalX, internalY: SomeInteger): uint16 =
+proc getPaletteIdx(ppu; sprite: Sprite, isAffine: bool, width, height, internalX, internalY: SomeInteger): uint16 =
   const spriteBase = 0x10000'u
   let widthInTiles = width shr 3
   var
     internalX = internalX
     internalY = internalY
-  if sprite.hFlip(): internalX = width - internalX - 1
-  if sprite.vFlip(): internalY = height - internalY - 1
+  # Only apply hFlip/vFlip for non-affine sprites (affine sprites use those bits for affine index)
+  if not isAffine:
+    if sprite.hFlip(): internalX = width - internalX - 1
+    if sprite.vFlip(): internalY = height - internalY - 1
   let tileX = internalX and 7
   let tileY = internalY and 7
   if sprite.colorMode == fourBpp:
@@ -274,14 +276,15 @@ proc renderSprites(ppu) =
           continue
 
         # Handle object window mode
+        let isAffine = sprite.objMode == affine or sprite.objMode == double
         if sprite.gfxMode == window:
-          let palette = ppu.getPaletteIdx(sprite, origWidth, origHeight, texX.uint, texY.uint)
+          let palette = ppu.getPaletteIdx(sprite, isAffine, origWidth, origHeight, texX.uint, texY.uint)
           if palette > 0:
             windowBuffer[screenX] = true
         else:
           let spritePixel = SpritePixel(
             priority: sprite.priority.uint16,
-            palette: ppu.getPaletteIdx(sprite, origWidth, origHeight, texX.uint, texY.uint),
+            palette: ppu.getPaletteIdx(sprite, isAffine, origWidth, origHeight, texX.uint, texY.uint),
             blends: sprite.gfxMode == blend,
             window: false
           )
