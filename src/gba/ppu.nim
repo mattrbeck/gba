@@ -254,8 +254,14 @@ proc renderSprites(ppu) =
       pc = 0
       pd = 0x100
 
-    if vcount in sprite.top ..< sprite.top + height.uint:
-      let internalY = (vcount - sprite.top).int32
+    # Handle Y coordinate wrapping: Y values 0-255 can wrap around the 160-line screen
+    # Treat Y >= 160 as negative offsets (e.g., Y=240 is -16)
+    let spriteY = if sprite.top >= 160: sprite.top.int32 - 256 else: sprite.top.int32
+    let spriteBottom = spriteY + height.int32
+
+    # Check if current scanline intersects with sprite
+    if vcount.int32 >= spriteY and vcount.int32 < spriteBottom:
+      let internalY = (vcount.int32 - spriteY)
       for screenX in max(0'u, sprite.left) ..< min(240'u, sprite.left + width.uint):
         let internalX = (screenX - sprite.left).int32
 
