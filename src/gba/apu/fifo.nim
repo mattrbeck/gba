@@ -59,7 +59,8 @@ proc getAmplitude*(fifo: FIFOChannel): float32 =
 
 proc write32*(fifo: FIFOChannel, value: uint32) =
   # Write 4 bytes to FIFO (called by DMA)
-  fifo.push(int8(value and 0xFF))
-  fifo.push(int8((value shr 8) and 0xFF))
-  fifo.push(int8((value shr 16) and 0xFF))
-  fifo.push(int8((value shr 24) and 0xFF))
+  # Use cast to reinterpret unsigned bytes as signed int8
+  fifo.push(cast[int8](uint8(value and 0xFF)))
+  fifo.push(cast[int8](uint8((value shr 8) and 0xFF)))
+  fifo.push(cast[int8](uint8((value shr 16) and 0xFF)))
+  fifo.push(cast[int8](uint8((value shr 24) and 0xFF)))
