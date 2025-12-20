@@ -67,6 +67,7 @@ var
   bgvofs: array[4, BGOFS]
   bgaff: array[2, array[4, uint16]]
   bgref: array[2, array[2, uint32]]
+  bgrefInternal: array[2, array[2, int32]]  # Internal reference points updated each scanline
   win0h: WINBOUND
   win1h: WINBOUND
   win0v: WINBOUND
@@ -143,9 +144,9 @@ proc renderAffineLayer(ppu; layer: SomeInteger) =
     pc = cast[int16](bgaff[affIdx][2]).int32
     pd = cast[int16](bgaff[affIdx][3]).int32
 
-    # Get reference points (signed 28.8 fixed-point)
-    refX = cast[int32](bgref[affIdx][0])
-    refY = cast[int32](bgref[affIdx][1])
+    # Get reference points from internal coordinates (updated each scanline)
+    refX = bgrefInternal[affIdx][0]
+    refY = bgrefInternal[affIdx][1]
 
     # Screen and character bases
     screenBase = bgcnt.screenBase * 0x800
@@ -580,7 +581,15 @@ proc startHblank(ppu: PPU): proc() = (proc() =
   if dispstat.hblankEnable:
     ppu.gba.interrupts.regIf.hblank = true
     ppu.gba.interrupts.scheduleCheck()
-  if vcount < height: ppu.scanline()
+  if vcount < height:
+    ppu.scanline()
+    # Update affine background reference points for next scanline
+    for affIdx in 0 ..< 2:
+      let
+        pb = cast[int16](bgaff[affIdx][1]).int32  # dmx
+        pd = cast[int16](bgaff[affIdx][3]).int32  # dmy
+      bgrefInternal[affIdx][0] += pb
+      bgrefInternal[affIdx][1] += pd
   ppu.gba.scheduler.schedule(272, endHblank(ppu), EventType.ppu))
 
 proc endHblank(ppu: PPU): proc() = (proc() =
@@ -641,8 +650,13 @@ proc `[]=`*(ppu: PPU, address: SomeInteger, value: uint8) =
     let
       bgNum = (address - 0x20) div 16
       offset = address and 0xF
-    if offset < 8: write(bgaff[bgNum][offset div 2], value, address and 1)
-    else:          write(bgref[bgNum][(offset - 8) div 4], value, address and 3)
+    if offset < 8:
+      write(bgaff[bgNum][offset div 2], value, address and 1)
+    else:
+      write(bgref[bgNum][(offset - 8) div 4], value, address and 3)
+      # When bgref is written, update internal reference points
+      bgrefInternal[bgNum][0] = cast[int32](bgref[bgNum][0])
+      bgrefInternal[bgNum][1] = cast[int32](bgref[bgNum][1])
   of 0x40..0x41: write(win0h, value, address and 1)
   of 0x42..0x43: write(win1h, value, address and 1)
   of 0x44..0x45: write(win0v, value, address and 1)
