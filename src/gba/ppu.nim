@@ -220,8 +220,16 @@ proc getPaletteIdx(ppu; sprite: Sprite, isAffine: bool, width, height, internalX
     result = (palettes shr ((tileX and 1) * 4)) and 0xF
     if result > 0: # pixel isn't transparent
       result = result + (sprite.paletteBank.uint16 shl 4) # adjust for bank
-  else:
-    echo "8bpp"
+  else: # eightBpp
+    const tileWidth = 0x40'u  # 8bpp tiles are twice as large (64 bytes vs 32 bytes)
+    var tileNum = (sprite.baseTileIdx shr 1).uint32  # Tile ID is divided by 2 for 8bpp
+    tileNum =
+      if dispcnt.obj1d:
+        tileNum + (internalY shr 3).uint32 * widthInTiles.uint32 + (internalX shr 3).uint32
+      else:
+        tileNum + (internalY shr 3).uint32 * 32                   + (internalX shr 3).uint32
+    let bytesIntoTile = (tileY * 8 + tileX).uint32  # 8 bytes per row (8 pixels * 1 byte each)
+    result = read[uint8](ppu.vram, spriteBase, tileWidth * tileNum + bytesIntoTile).uint16
 
 proc renderSprites(ppu) =
   if not dispcnt.controlBits.bit(4): return
