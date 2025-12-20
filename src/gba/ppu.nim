@@ -126,6 +126,75 @@ proc renderTextLayer(ppu; layer: SomeInteger) =
     if paletteIndex > 0: paletteIndex += paletteBank shl 4
     layerBuffers[layer][col] = paletteIndex
 
+proc renderAffineLayer(ppu; layer: SomeInteger) =
+  if not dispcnt.controlBits.bit(layer): return
+  let
+    bgcnt = bgcnts[layer]
+    affIdx = layer - 2  # BG2 uses aff[0], BG3 uses aff[1]
+
+    # Get affine parameters (signed 8.8 fixed-point)
+    pa = cast[int16](bgaff[affIdx][0]).int32
+    pb = cast[int16](bgaff[affIdx][1]).int32
+    pc = cast[int16](bgaff[affIdx][2]).int32
+    pd = cast[int16](bgaff[affIdx][3]).int32
+
+    # Get reference points (signed 28.8 fixed-point)
+    refX = cast[int32](bgref[affIdx][0])
+    refY = cast[int32](bgref[affIdx][1])
+
+    # Screen and character bases
+    screenBase = bgcnt.screenBase * 0x800
+    charBase = bgcnt.charBase * 0x4000
+
+    # Size in tiles (always square for affine)
+    sizeTiles = 16'u32 shl bgcnt.screenSize  # 16, 32, 64, 128 tiles
+    sizePixels = sizeTiles shl 3  # Convert to pixels
+
+  # Internal X/Y start at reference point for this scanline
+  var
+    intX = refX
+    intY = refY
+
+  for col in 0'u32 ..< width.uint32:
+    # Convert from 8.8 fixed-point to pixel coordinates
+    let
+      x = intX shr 8
+      y = intY shr 8
+
+    # Increment by dx/dy
+    intX += pa
+    intY += pc
+
+    # Check bounds (with optional wrapping)
+    var inBounds = true
+    var pixelX = x
+    var pixelY = y
+
+    if bgcnt.affineWrap:
+      # Wrap around
+      pixelX = pixelX mod sizePixels.int32
+      pixelY = pixelY mod sizePixels.int32
+      if pixelX < 0: pixelX += sizePixels.int32
+      if pixelY < 0: pixelY += sizePixels.int32
+    else:
+      # Check if in bounds
+      if x < 0 or x >= sizePixels.int32 or y < 0 or y >= sizePixels.int32:
+        inBounds = false
+
+    if inBounds:
+      # Get tile and pixel within tile
+      let
+        tileX = pixelX.uint32 shr 3
+        tileY = pixelY.uint32 shr 3
+        tileId = ppu.vram[screenBase + tileY * sizeTiles + tileX]
+        pixX = pixelX.uint32 and 7
+        pixY = pixelY.uint32 and 7
+        palIdx = ppu.vram[charBase + tileId.uint32 * 0x40 + pixY * 8 + pixX]
+
+      layerBuffers[layer][col] = palIdx
+    else:
+      layerBuffers[layer][col] = 0
+
 proc getPaletteIdx(ppu; sprite: Sprite, width, height, internalX, internalY: SomeInteger): uint16 =
   const spriteBase = 0x10000'u
   let widthInTiles = width shr 3
@@ -158,16 +227,56 @@ proc renderSprites(ppu) =
     if sprite.objMode == disabled: continue
     if sprite.gfxMode == forbiddenMode: continue
     if sprite.shape == forbiddenShape: continue
-    let (width, height) = spriteSizes[sprite.shape][sprite.size]
+    var (width, height) = spriteSizes[sprite.shape][sprite.size]
+    let (origWidth, origHeight) = (width, height)
+
+    # Get affine parameters if needed
+    var pa, pb, pc, pd: int32
+    if sprite.objMode == affine or sprite.objMode == double:
+      # Read affine parameters from OAM
+      let affIdx = sprite.affineIdx.int * 4
+      pa = cast[int16](sprites[affIdx].affineBuffer).int32
+      pb = cast[int16](sprites[affIdx + 1].affineBuffer).int32
+      pc = cast[int16](sprites[affIdx + 2].affineBuffer).int32
+      pd = cast[int16](sprites[affIdx + 3].affineBuffer).int32
+
+      # Double-size mode doubles the sprite bounding box
+      if sprite.objMode == double:
+        width = width * 2
+        height = height * 2
+    else:
+      # Identity matrix for non-affine sprites
+      pa = 0x100
+      pb = 0
+      pc = 0
+      pd = 0x100
+
     if vcount in sprite.top ..< sprite.top + height.uint:
-      let internalY = vcount - sprite.top
+      let internalY = (vcount - sprite.top).int32
       for screenX in max(0'u, sprite.left) ..< min(240'u, sprite.left + width.uint):
-        let internalX = screenX - sprite.left
+        let internalX = (screenX - sprite.left).int32
+
+        var texX, texY: int32
+        if sprite.objMode == affine or sprite.objMode == double:
+          # Transform from sprite space to texture space
+          let
+            ix = internalX - (width.int32 div 2)
+            iy = internalY - (height.int32 div 2)
+          texX = ((pa * ix + pb * iy) shr 8) + (origWidth.int32 div 2)
+          texY = ((pc * ix + pd * iy) shr 8) + (origHeight.int32 div 2)
+        else:
+          texX = internalX
+          texY = internalY
+
+        # Check if transformed coordinate is in bounds
+        if texX < 0 or texX >= origWidth.int32 or texY < 0 or texY >= origHeight.int32:
+          continue
+
         let spritePixel = SpritePixel(
           priority: sprite.priority.uint16,
-          palette: ppu.getPaletteIdx(sprite, width, height, internalX, internalY),
+          palette: ppu.getPaletteIdx(sprite, origWidth, origHeight, texX.uint, texY.uint),
           blends: sprite.gfxMode == blend,
-          window: sprite.gfxMode == window # todo: respect hijacking
+          window: sprite.gfxMode == window
         )
         let existing = spriteBuffer[screenX]
         if spritePixel.priority < existing.priority or existing.palette == 0:
@@ -208,22 +317,45 @@ proc scanline(ppu: PPU) =
       pixel = 0
   case dispcnt.mode
   of 0:
+    # Mode 0: 4 text backgrounds
     for layer in 0 ..< 4:
       ppu.renderTextLayer(layer)
     ppu.renderSprites()
     composite(ppu.pram, scanline)
   of 1:
-    for layer in 0 ..< 3:
-      ppu.renderTextLayer(layer)
+    # Mode 1: 2 text backgrounds + 1 affine background
+    ppu.renderTextLayer(0)
+    ppu.renderTextLayer(1)
+    ppu.renderAffineLayer(2)
+    ppu.renderSprites()
+    composite(ppu.pram, scanline)
+  of 2:
+    # Mode 2: 2 affine backgrounds
+    ppu.renderAffineLayer(2)
+    ppu.renderAffineLayer(3)
+    ppu.renderSprites()
     composite(ppu.pram, scanline)
   of 3:
+    # Mode 3: 240x160 16-bit bitmap
     for col in 0 ..< width:
       scanline[col] = cast[ptr FrameBuffer](addr ppu.vram)[rowBase + col]
   of 4:
+    # Mode 4: 240x160 8-bit indexed bitmap
     let base = if dispcnt.page: 0xA000 else: 0
     for col in 0 ..< width:
       let palIdx = ppu.vram[base + rowBase + col]
       scanline[col] = cast[ptr FrameBuffer](addr ppu.pram)[palIdx]
+  of 5:
+    # Mode 5: 160x128 16-bit bitmap
+    if vcount < 128:
+      let base = if dispcnt.page: 0xA000 else: 0
+      for col in 0 ..< 160:
+        scanline[col] = cast[ptr FrameBuffer](addr ppu.vram)[base div 2 + row * 160 + col]
+      for col in 160 ..< width:
+        scanline[col] = 0
+    else:
+      for col in 0 ..< width:
+        scanline[col] = 0
   else: echo "Unsupported background mode " & $dispcnt.mode
 
 proc startLine(ppu: PPU): proc() = (proc() =
