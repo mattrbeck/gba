@@ -120,11 +120,15 @@ proc renderTextLayer(ppu; layer: SomeInteger) =
       tileX = effectiveX shr 3
       screenEntry = read[uint16](ppu.vram, screenBase, seIndex(tileX, tileY, bgcnt.screenSize))
       tileId = screenEntry.bitsliced(0..9)
-      paletteBank = screenEntry.bitsliced(12..15).uint8
       x = (effectiveX and 7) xor (7 * screenEntry.bitsliced(10..10))
       y = (effectiveY and 7) xor (7 * screenEntry.bitsliced(11..11))
-    var paletteIndex = (ppu.vram[charBase + tileId * 0x20 + y * 4 + (x shr 1)] shr ((x and 1) * 4)) and 0xF
-    if paletteIndex > 0: paletteIndex += paletteBank shl 4
+    var paletteIndex: uint16
+    if bgcnt.colorMode:  # 8bpp (256 color)
+      paletteIndex = ppu.vram[charBase + tileId * 0x40 + y * 8 + x].uint16
+    else:  # 4bpp (16 color with palette banking)
+      let paletteBank = screenEntry.bitsliced(12..15).uint8
+      paletteIndex = (ppu.vram[charBase + tileId * 0x20 + y * 4 + (x shr 1)] shr ((x and 1) * 4)) and 0xF
+      if paletteIndex > 0: paletteIndex += paletteBank shl 4
     layerBuffers[layer][col] = paletteIndex
 
 proc renderAffineLayer(ppu; layer: SomeInteger) =
