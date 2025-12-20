@@ -1,70 +1,51 @@
-import strutils
+import types, regs
 
-import types, regs, interrupts
+# DMA register state (no bus dependencies to avoid circular imports)
+# Actual transfers are handled by dma_controller.nim
 
-const
-  transferBytes: array[DmaChunkSize, uint32] = [2'u32, 4]
-  addressAdjustments: array[DmaAddressControl, uint32] = [1'u32, 0xFFFFFFFF'u32, 0, 1]
+type
+  DMAState* = object
+    sad*: uint32        # Source address
+    dad*: uint32        # Destination address
+    cnt_l*: uint16      # Word count
+    cnt_h*: DMACNT      # Control register
+    src*: uint32        # Internal source pointer
+    dst*: uint32        # Internal destination pointer
 
 var
-  dmasad: array[4, uint32]
-  dmadad: array[4, uint32]
-  dmacnt_l: array[4, uint16]
-  dmacnt_h: array[4, DMACNT]
-  src: array[4, uint32]
-  dst: array[4, uint32]
+  dmaState*: array[4, DMAState]
 
 proc newDMA*(gba: GBA): DMA =
   new result
   result.gba = gba
 
-proc trigger(gba: GBA, channel: SomeInteger) =
-  let
-    dmacnt = dmacnt_h[channel]
-    len = dmacnt_l[channel]
-    transferSize = transferBytes[dmacnt.transfer]
-    srcDelta  = transferSize * addressAdjustments[dmacnt.srcCtrl]
-    dstDelta  = transferSize * addressAdjustments[dmacnt.dstCtrl]
+# Check if a DMA channel is configured for FIFO refill
+proc isFifoRefillDMA*(channel: int, fifoAddress: uint32): bool =
+  let state = dmaState[channel]
+  result = state.cnt_h.enable and
+           state.cnt_h.timing == special and
+           state.dad == fifoAddress
 
-  if dmacnt.srcCtrl == DmaAddressControl.reload:
-    echo "Prohibited source address control"
+# Get DMA configuration for transfer
+proc getDMAConfig*(channel: int): tuple[src, dst: uint32, len: uint16, ctrl: DMACNT] =
+  let state = dmaState[channel]
+  (state.src, state.dst, state.cnt_l, state.cnt_h)
 
-  for idx in 0 ..< int(len):
-    if dmacnt.transfer == DmaChunkSize.halfword:
-      gba.bus[dst[channel]] = gba.bus.read[:uint16](src[channel])
-    else:
-      gba.bus[dst[channel]] = gba.bus.read[:uint32](src[channel])
-    src[channel] += srcDelta
-    dst[channel] += dstDelta
+# Update DMA internal pointers after transfer
+proc updateDMAPointers*(channel: int, newSrc, newDst: uint32) =
+  dmaState[channel].src = newSrc
+  dmaState[channel].dst = newDst
 
-  if dmacnt.dstCtrl == DmaAddressControl.reload:
-    dst[channel] = dmadad[channel]
-  if not dmacnt.repeat or dmacnt.timing == DmaStartTiming.immediate:
-    dmacnt_h[channel].enable = false
-  if dmacnt.irq:
-    case channel:
-    of 0: gba.interrupts.regIf.dma0 = true
-    of 1: gba.interrupts.regIf.dma1 = true
-    of 2: gba.interrupts.regIf.dma2 = true
-    of 3: gba.interrupts.regIf.dma3 = true
-    else: quit "Bad dma channel. Impossible case."
-    gba.interrupts.scheduleCheck()
+# Disable DMA channel after transfer (if not repeating)
+proc finalizeDMA*(channel: int) =
+  let state = addr dmaState[channel]
+  if state.cnt_h.dstCtrl == DmaAddressControl.reload:
+    state.dst = state.dad
+  if not state.cnt_h.repeat or state.cnt_h.timing == DmaStartTiming.immediate:
+    state.cnt_h.enable = false
 
-# Get DMA source address for FIFO refill (called from timer.nim)
-proc getFifoRefillSource*(dma: DMA, fifoAddress: uint32): (bool, uint32) =
-  for channel in 1..2:  # Only DMA1 and DMA2 can do sound DMA
-    let dmacnt = dmacnt_h[channel]
-    if dmacnt.enable and dmacnt.timing == special and dmadad[channel] == fifoAddress:
-      return (true, src[channel])
-  return (false, 0'u32)
-
-# Update DMA source address after FIFO refill (called from timer.nim)
-proc updateFifoRefillSource*(dma: DMA, fifoAddress: uint32, newSrc: uint32) =
-  for channel in 1..2:
-    let dmacnt = dmacnt_h[channel]
-    if dmacnt.enable and dmacnt.timing == special and dmadad[channel] == fifoAddress:
-      src[channel] = newSrc
-      return
+# Trigger callback for immediate DMA (set by dma_controller)
+var immediateDMATrigger*: proc(gba: GBA, channel: int) {.nimcall.}
 
 proc `[]`*(dma: DMA, address: SomeInteger): uint8 =
   let
@@ -72,11 +53,11 @@ proc `[]`*(dma: DMA, address: SomeInteger): uint8 =
     channel = dmaAddr div 12
     reg = dmaAddr mod 12
   case reg:
-  of 0..3: read(dmasad[channel], address and 3)
-  of 4..7: read(dmadad[channel], address and 3)
-  of 8..9: read(dmacnt_l[channel], address and 1)
-  of 10..11: read(dmacnt_h[channel], address and 1)
-  else: echo "Unmapped DMA read: " & address.toHex(8); 0
+  of 0..3: read(dmaState[channel].sad, address and 3)
+  of 4..7: read(dmaState[channel].dad, address and 3)
+  of 8..9: read(dmaState[channel].cnt_l, address and 1)
+  of 10..11: read(dmaState[channel].cnt_h, address and 1)
+  else: 0
 
 proc `[]=`*(dma: DMA, address: SomeInteger, value: uint8) =
   let
@@ -84,14 +65,17 @@ proc `[]=`*(dma: DMA, address: SomeInteger, value: uint8) =
     channel = dmaAddr div 12
     reg = dmaAddr mod 12
   case reg:
-  of 0..3: write(dmasad[channel], value, address and 3)
-  of 4..7: write(dmadad[channel], value, address and 3)
-  of 8..9: write(dmacnt_l[channel], value, address and 1)
+  of 0..3: write(dmaState[channel].sad, value, address and 3)
+  of 4..7: write(dmaState[channel].dad, value, address and 3)
+  of 8..9: write(dmaState[channel].cnt_l, value, address and 1)
   of 10..11:
-    let wasEnabled = dmacnt_h[channel].enable
-    write(dmacnt_h[channel], value, address and 1)
-    if dmacnt_h[channel].enable and not wasEnabled:
-      src[channel] = dmasad[channel]
-      dst[channel] = dmadad[channel]
-      if dmacnt_h[channel].timing == immediate: trigger(dma.gba, channel)
-  else: echo "Unmapped DMA write: ", address.toHex(8), " = ", value.toHex(2)
+    let wasEnabled = dmaState[channel].cnt_h.enable
+    write(dmaState[channel].cnt_h, value, address and 1)
+    if dmaState[channel].cnt_h.enable and not wasEnabled:
+      # DMA enabled - initialize internal pointers
+      dmaState[channel].src = dmaState[channel].sad
+      dmaState[channel].dst = dmaState[channel].dad
+      # Trigger immediate DMA if configured
+      if dmaState[channel].cnt_h.timing == immediate and immediateDMATrigger != nil:
+        immediateDMATrigger(dma.gba, int(channel))
+  else: discard

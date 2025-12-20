@@ -2,7 +2,7 @@ import os
 import sdl2
 import times
 
-import gba/[types, display, scheduler, bus, cpu, ppu, apu, dma, timer, serial, keypad, interrupts, util, save]
+import gba/[types, display, scheduler, bus, cpu, ppu, apu, dma, dma_controller, timer, serial, keypad, interrupts, util, save]
 
 proc scheduleSaveWrite(gba: GBA) =
   # Schedule next save write (~60 times per second)
@@ -25,6 +25,8 @@ proc newGBA(bios, rom: string): GBA =
   result.serial = newSerial(result)
   result.keypad = newKeypad(result)
   result.interrupts = newInterrupts(result)
+  # Initialize DMA controller
+  initDMAController()
   # Start periodic save writing
   scheduleSaveWrite(result)
 

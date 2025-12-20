@@ -134,12 +134,13 @@ proc timerOverflow*(apu: APU, timerNum: int) =
   if FIFOChannel(apu.fifoB).timerSelect == timerNum:
     FIFOChannel(apu.fifoB).timerOverflow()
 
+# Callback for FIFO refill (set by dma_controller)
+var fifoRefillCallback*: proc(gba: GBA, timerNum: int) {.nimcall.}
+
 # Check FIFO refill (called by timer.nim)
-# Note: Automatic DMA refill not implemented due to circular module dependencies
-# (bus -> mmio -> dma, but DMA refill needs to read from bus).
-# Games must manually write to FIFO or rely on their own DMA configuration.
 proc checkFifoRefill*(apu: APU, timerNum: int) =
-  discard
+  if fifoRefillCallback != nil:
+    fifoRefillCallback(apu.gba, timerNum)
 
 # Register reads/writes
 proc `[]`*(apu: APU, address: uint32): uint8 =
