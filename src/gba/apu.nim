@@ -134,15 +134,12 @@ proc timerOverflow*(apu: APU, timerNum: int) =
   if FIFOChannel(apu.fifoB).timerSelect == timerNum:
     FIFOChannel(apu.fifoB).timerOverflow()
 
-# Check if FIFO needs refill (called by timer.nim for DMA)
-proc needsFifoRefill*(apu: APU, timerNum: int, fifoAddress: var uint32): bool =
-  if FIFOChannel(apu.fifoA).timerSelect == timerNum and FIFOChannel(apu.fifoA).needsRefill():
-    fifoAddress = 0x040000A0
-    return true
-  if FIFOChannel(apu.fifoB).timerSelect == timerNum and FIFOChannel(apu.fifoB).needsRefill():
-    fifoAddress = 0x040000A4
-    return true
-  return false
+# Check FIFO refill (called by timer.nim)
+# Note: Automatic DMA refill not implemented due to circular module dependencies
+# (bus -> mmio -> dma, but DMA refill needs to read from bus).
+# Games must manually write to FIFO or rely on their own DMA configuration.
+proc checkFifoRefill*(apu: APU, timerNum: int) =
+  discard
 
 # Register reads/writes
 proc `[]`*(apu: APU, address: uint32): uint8 =

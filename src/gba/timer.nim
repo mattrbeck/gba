@@ -30,12 +30,9 @@ proc overflow(timer: Timer, num: SomeInteger): proc() = (proc() =
     counter[num + 1] += 1
     if counter[num + 1] == 0: timer.overflowProcs[num + 1]()
 
-  # Handle APU FIFO sample output
+  # Handle APU FIFO sample output and DMA refills
   timer.gba.apu.timerOverflow(num)
-
-  # Note: DMA audio refill would be triggered here, but due to circular
-  # dependencies between bus/mmio/dma modules, we rely on games to set up
-  # DMA properly which will refill FIFOs automatically via the DMA timing system
+  timer.gba.apu.checkFifoRefill(num)
 
   if tmcnt[num].irq:
     case num:
