@@ -282,18 +282,155 @@ proc renderSprites(ppu) =
         if spritePixel.priority < existing.priority or existing.palette == 0:
           spriteBuffer[screenX] = spritePixel
 
+proc blendColors(top, bot: uint16, eva, evb: int): uint16 =
+  # Extract RGB components from BGR555 format
+  let
+    topR = (top and 0x1F).int
+    topG = ((top shr 5) and 0x1F).int
+    topB = ((top shr 10) and 0x1F).int
+    botR = (bot and 0x1F).int
+    botG = ((bot shr 5) and 0x1F).int
+    botB = ((bot shr 10) and 0x1F).int
+
+  # Apply blending formula: (top * EVA + bot * EVB) / 16
+  let
+    blendR = min(31, (topR * eva + botR * evb) shr 4)
+    blendG = min(31, (topG * eva + botG * evb) shr 4)
+    blendB = min(31, (topB * eva + botB * evb) shr 4)
+
+  # Repack to BGR555
+  result = blendR.uint16 or (blendG.uint16 shl 5) or (blendB.uint16 shl 10)
+
+proc brightenColor(color: uint16, evy: int): uint16 =
+  # Extract RGB components
+  let
+    r = (color and 0x1F).int
+    g = ((color shr 5) and 0x1F).int
+    b = ((color shr 10) and 0x1F).int
+
+  # Apply brightness increase: color + (white - color) * EVY / 16
+  let
+    brightR = r + (((31 - r) * evy) shr 4)
+    brightG = g + (((31 - g) * evy) shr 4)
+    brightB = b + (((31 - b) * evy) shr 4)
+
+  # Repack to BGR555
+  result = brightR.uint16 or (brightG.uint16 shl 5) or (brightB.uint16 shl 10)
+
+proc darkenColor(color: uint16, evy: int): uint16 =
+  # Extract RGB components
+  let
+    r = (color and 0x1F).int
+    g = ((color shr 5) and 0x1F).int
+    b = ((color shr 10) and 0x1F).int
+
+  # Apply brightness decrease: color - color * EVY / 16
+  let
+    darkR = r - ((r * evy) shr 4)
+    darkG = g - ((g * evy) shr 4)
+    darkB = b - ((b * evy) shr 4)
+
+  # Repack to BGR555
+  result = darkR.uint16 or (darkG.uint16 shl 5) or (darkB.uint16 shl 10)
+
+proc isFirstTarget(layer: int, isSprite: bool): bool =
+  if isSprite:
+    return bldcnt.objFirst
+  else:
+    case layer
+    of 0: return bldcnt.bg0First
+    of 1: return bldcnt.bg1First
+    of 2: return bldcnt.bg2First
+    of 3: return bldcnt.bg3First
+    else: return false
+
+proc isSecondTarget(layer: int, isSprite: bool): bool =
+  if isSprite:
+    return bldcnt.objSecond
+  else:
+    case layer
+    of 0: return bldcnt.bg0Second
+    of 1: return bldcnt.bg1Second
+    of 2: return bldcnt.bg2Second
+    of 3: return bldcnt.bg3Second
+    else: return false
+
 proc calculateColor(pram: array[0x400, uint8], col: SomeInteger): uint16 =
   let spritePixel = spriteBuffer[col]
+  var
+    topColor: uint16 = 0
+    botColor: uint16 = 0
+    topIsFirst = false
+    topIsSprite = false
+    foundTop = false
+    foundBot = false
+
+  # Find top and bottom layers for blending
   for priority in 0'u32 ..< 4'u32:
     if spritePixel.priority == priority and spritePixel.palette > 0:
-      return read[uint16](pram, 0x200'u16, spritePixel.palette)
+      let color = read[uint16](pram, 0x200'u16, spritePixel.palette)
+      if not foundTop:
+        topColor = color
+        topIsFirst = isFirstTarget(0, true) or spritePixel.blends
+        topIsSprite = true
+        foundTop = true
+        if bldcnt.effect == none or (not topIsFirst and not spritePixel.blends):
+          return topColor
+      elif not foundBot and (topIsFirst or (topIsSprite and spritePixel.blends)) and isSecondTarget(0, true):
+        botColor = color
+        foundBot = true
+        break
+
     for layer in 0 ..< 4:
       let bgcnt = bgcnts[layer]
       if bgcnt.priority == priority:
         let palette = layerBuffers[layer][col]
         if palette > 0:
-          return read[uint16](pram, 0'u16, palette)
-  return 0
+          let color = read[uint16](pram, 0'u16, palette)
+          if not foundTop:
+            topColor = color
+            topIsFirst = isFirstTarget(layer, false)
+            topIsSprite = false
+            foundTop = true
+            if bldcnt.effect == none or not topIsFirst:
+              return topColor
+          elif not foundBot and topIsFirst and isSecondTarget(layer, false):
+            botColor = color
+            foundBot = true
+            break
+
+  # Check if backdrop is the second target (palette index 0)
+  if foundTop and topIsFirst and not foundBot and bldcnt.bdSecond:
+    botColor = read[uint16](pram, 0'u16, 0)
+    foundBot = true
+
+  # Apply blending if we found a top layer that's a first target
+  if foundTop and topIsFirst:
+    case bldcnt.effect
+    of blend:
+      if foundBot:
+        # Alpha blend between top and bottom
+        let eva = min(16, bldalpha.eva.int)
+        let evb = min(16, bldalpha.evb.int)
+        return blendColors(topColor, botColor, eva, evb)
+      else:
+        return topColor
+    of bright:
+      # Brightness increase
+      let evy = min(16, bldy.evy.int)
+      return brightenColor(topColor, evy)
+    of dark:
+      # Brightness decrease
+      let evy = min(16, bldy.evy.int)
+      return darkenColor(topColor, evy)
+    of none:
+      return topColor
+
+  # If no layer found, return backdrop color
+  if not foundTop:
+    return read[uint16](pram, 0'u16, 0)
+
+  return topColor
 
 proc composite(pram: array[0x400, uint8], scanline: ptr Scanline) =
   for col in 0 ..< width:
