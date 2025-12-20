@@ -24,14 +24,14 @@ proc detectStorageType(rom: openArray[uint8]): StorageType =
   # Default to SRAM if no marker found
   return StorageType.SRAM
 
-proc newSave*(gba: GBA, romPath: string = ""): Save =
+proc newSave*(gba: GBA, rom: openArray[uint8], romPath: string = ""): Save =
   new result
   result.gba = gba
   result.romPath = romPath
   result.dirty = false
 
   # Detect storage type from ROM
-  let storageType = detectStorageType(gba.bus.rom)
+  let storageType = detectStorageType(rom)
 
   # Create appropriate storage
   case storageType

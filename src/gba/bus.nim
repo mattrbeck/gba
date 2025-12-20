@@ -25,7 +25,7 @@ proc newBus*(gba: GBA, biosPath, romPath: string): Bus =
   close(biosFile)
   close(romFile)
   # Initialize save system after ROM is loaded (for auto-detection)
-  result.save = newSave(gba, romPath)
+  result.save = newSave(gba, result.rom, romPath)
 
 # Increment the access cycle count for the cycles needed by this memory region.
 proc countCycles[T: uint8 | uint16 | uint32](page: SomeInteger) {.inline.} =
