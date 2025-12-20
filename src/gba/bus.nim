@@ -1,6 +1,6 @@
 import bitops, strutils
 
-import types, util, mmio, save, ppu
+import types, util, mmio, save, ppu, apu
 
 # Timings for rom are estimated for game compatibility.
 const accessTimingTable = [
@@ -74,6 +74,15 @@ proc `[]=`*[T: uint8 | uint16 | uint32](bus: Bus, index: uint32, value: T) =
   of 0x3: cast[ptr T](addr bus.ewram[aligned and 0x7FFF])[] = value
   of 0x4:
       let mmioAddr = aligned and 0xFFFFFF
+      # Special handling for FIFO 32-bit writes (used by DMA)
+      when T is uint32:
+        if mmioAddr == 0xA0:
+          bus.gba.apu.writeFIFO_A(value)
+          return
+        elif mmioAddr == 0xA4:
+          bus.gba.apu.writeFIFO_B(value)
+          return
+      # Normal MMIO byte-level writes
       bus.mmio[mmioAddr] = cast[uint8](value)
       when T is uint16 or T is uint32:
         bus.mmio[mmioAddr + 1] = cast[uint8](value shr 8)

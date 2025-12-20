@@ -1,4 +1,4 @@
-import types, interrupts, regs, scheduler
+import types, interrupts, regs, scheduler, apu
 
 const
   periods = [1'u16, 64, 256, 1024]
@@ -29,7 +29,14 @@ proc overflow(timer: Timer, num: SomeInteger): proc() = (proc() =
   if num < 3 and tmcnt[num + 1].cascade and tmcnt[num + 1].enable:
     counter[num + 1] += 1
     if counter[num + 1] == 0: timer.overflowProcs[num + 1]()
-  # todo: handle apu logic
+
+  # Handle APU FIFO sample output
+  timer.gba.apu.timerOverflow(num)
+
+  # Note: DMA audio refill would be triggered here, but due to circular
+  # dependencies between bus/mmio/dma modules, we rely on games to set up
+  # DMA properly which will refill FIFOs automatically via the DMA timing system
+
   if tmcnt[num].irq:
     case num:
     of 0: timer.gba.interrupts.regIf.timer0 = true
