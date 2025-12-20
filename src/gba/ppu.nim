@@ -56,6 +56,7 @@ var
   framebuffer: FrameBuffer
   layerBuffers: array[4, Scanline]
   spriteBuffer: array[width, SpritePixel]
+  windowBuffer: array[width, bool]  # Tracks object window pixels
 
   dispcnt: DISPCNT
   greenSwap: uint16
@@ -272,15 +273,21 @@ proc renderSprites(ppu) =
         if texX < 0 or texX >= origWidth.int32 or texY < 0 or texY >= origHeight.int32:
           continue
 
-        let spritePixel = SpritePixel(
-          priority: sprite.priority.uint16,
-          palette: ppu.getPaletteIdx(sprite, origWidth, origHeight, texX.uint, texY.uint),
-          blends: sprite.gfxMode == blend,
-          window: sprite.gfxMode == window
-        )
-        let existing = spriteBuffer[screenX]
-        if spritePixel.priority < existing.priority or existing.palette == 0:
-          spriteBuffer[screenX] = spritePixel
+        # Handle object window mode
+        if sprite.gfxMode == window:
+          let palette = ppu.getPaletteIdx(sprite, origWidth, origHeight, texX.uint, texY.uint)
+          if palette > 0:
+            windowBuffer[screenX] = true
+        else:
+          let spritePixel = SpritePixel(
+            priority: sprite.priority.uint16,
+            palette: ppu.getPaletteIdx(sprite, origWidth, origHeight, texX.uint, texY.uint),
+            blends: sprite.gfxMode == blend,
+            window: false
+          )
+          let existing = spriteBuffer[screenX]
+          if spritePixel.priority < existing.priority or existing.palette == 0:
+            spriteBuffer[screenX] = spritePixel
 
 proc blendColors(top, bot: uint16, eva, evb: int): uint16 =
   # Extract RGB components from BGR555 format
@@ -355,8 +362,47 @@ proc isSecondTarget(layer: int, isSprite: bool): bool =
     of 3: return bldcnt.bg3Second
     else: return false
 
-proc calculateColor(pram: array[0x400, uint8], col: SomeInteger): uint16 =
+proc inWindowBounds(x, y: int, horizontal, vertical: WINBOUND): bool =
+  # Window bounds can wrap around screen edges
+  let
+    x1 = horizontal.startPos.int
+    x2 = horizontal.endPos.int
+    y1 = vertical.startPos.int
+    y2 = vertical.endPos.int
+    inX = if x2 >= x1: (x >= x1 and x < x2) else: (x >= x1 or x < x2)
+    inY = if y2 >= y1: (y >= y1 and y < y2) else: (y >= y1 or y < y2)
+  result = inX and inY
+
+proc getWindowEnables(col: int): tuple[enableBits: uint8, effectsEnabled: bool] =
+  # Check windows in priority order: WIN0 -> WIN1 -> OBJ -> OUT
+
+  # Window 0
+  if dispcnt.window0 and inWindowBounds(col, vcount.int, win0h, win0v):
+    return (winin.win0enable.uint8, winin.win0effects)
+
+  # Window 1
+  if dispcnt.window1 and inWindowBounds(col, vcount.int, win1h, win1v):
+    return (winin.win1enable.uint8, winin.win1effects)
+
+  # Object window
+  if dispcnt.windowObj and windowBuffer[col]:
+    return (winout.winObjEnable.uint8, winout.winObjEffects)
+
+  # Outside windows (if any window is enabled)
+  if dispcnt.window0 or dispcnt.window1 or dispcnt.windowObj:
+    return (winout.winOutEnable.uint8, winout.winOutEffects)
+
+  # No windows - all layers enabled
+  return (0x1F'u8, true)  # All 5 layers (BG0-3 + OBJ) enabled
+
+proc calculateColor(pram: array[0x400, uint8], col: SomeInteger, enableBits: uint8, effectsEnabled: bool): uint16 =
   let spritePixel = spriteBuffer[col]
+  let
+    objEnabled = enableBits.bit(4)
+    bg0Enabled = enableBits.bit(0)
+    bg1Enabled = enableBits.bit(1)
+    bg2Enabled = enableBits.bit(2)
+    bg3Enabled = enableBits.bit(3)
   var
     topColor: uint16 = 0
     botColor: uint16 = 0
@@ -365,25 +411,32 @@ proc calculateColor(pram: array[0x400, uint8], col: SomeInteger): uint16 =
     foundTop = false
     foundBot = false
 
-  # Find top and bottom layers for blending
+  # Find top and bottom layers for blending (respecting window enables)
   for priority in 0'u32 ..< 4'u32:
-    if spritePixel.priority == priority and spritePixel.palette > 0:
+    if objEnabled and spritePixel.priority == priority and spritePixel.palette > 0:
       let color = read[uint16](pram, 0x200'u16, spritePixel.palette)
       if not foundTop:
         topColor = color
         topIsFirst = isFirstTarget(0, true) or spritePixel.blends
         topIsSprite = true
         foundTop = true
-        if bldcnt.effect == none or (not topIsFirst and not spritePixel.blends):
+        if bldcnt.effect == none or not effectsEnabled or (not topIsFirst and not spritePixel.blends):
           return topColor
-      elif not foundBot and (topIsFirst or (topIsSprite and spritePixel.blends)) and isSecondTarget(0, true):
+      elif not foundBot and effectsEnabled and (topIsFirst or (topIsSprite and spritePixel.blends)) and isSecondTarget(0, true):
         botColor = color
         foundBot = true
         break
 
     for layer in 0 ..< 4:
       let bgcnt = bgcnts[layer]
-      if bgcnt.priority == priority:
+      let layerEnabled = case layer
+        of 0: bg0Enabled
+        of 1: bg1Enabled
+        of 2: bg2Enabled
+        of 3: bg3Enabled
+        else: false
+
+      if layerEnabled and bgcnt.priority == priority:
         let palette = layerBuffers[layer][col]
         if palette > 0:
           let color = read[uint16](pram, 0'u16, palette)
@@ -392,20 +445,20 @@ proc calculateColor(pram: array[0x400, uint8], col: SomeInteger): uint16 =
             topIsFirst = isFirstTarget(layer, false)
             topIsSprite = false
             foundTop = true
-            if bldcnt.effect == none or not topIsFirst:
+            if bldcnt.effect == none or not effectsEnabled or not topIsFirst:
               return topColor
-          elif not foundBot and topIsFirst and isSecondTarget(layer, false):
+          elif not foundBot and effectsEnabled and topIsFirst and isSecondTarget(layer, false):
             botColor = color
             foundBot = true
             break
 
   # Check if backdrop is the second target (palette index 0)
-  if foundTop and topIsFirst and not foundBot and bldcnt.bdSecond:
+  if foundTop and topIsFirst and effectsEnabled and not foundBot and bldcnt.bdSecond:
     botColor = read[uint16](pram, 0'u16, 0)
     foundBot = true
 
-  # Apply blending if we found a top layer that's a first target
-  if foundTop and topIsFirst:
+  # Apply blending if we found a top layer that's a first target and effects are enabled
+  if foundTop and topIsFirst and effectsEnabled:
     case bldcnt.effect
     of blend:
       if foundBot:
@@ -434,7 +487,8 @@ proc calculateColor(pram: array[0x400, uint8], col: SomeInteger): uint16 =
 
 proc composite(pram: array[0x400, uint8], scanline: ptr Scanline) =
   for col in 0 ..< width:
-    scanline[col] = calculateColor(pram, col)
+    let (enableBits, effectsEnabled) = getWindowEnables(col)
+    scanline[col] = calculateColor(pram, col, enableBits, effectsEnabled)
 
 proc getLine(buffer: var FrameBuffer, row: SomeInteger): ptr Scanline =
   result = cast[ptr array[buffer.width, buffer.T]](addr buffer[buffer.width * row])
@@ -448,7 +502,9 @@ proc scanline(ppu: PPU) =
     row = int(vcount)
     rowBase = row * width
   var scanline = framebuffer.getLine(row)
-  for col in 0 ..< width: spriteBuffer[col] = SpritePixel(priority: 4)
+  for col in 0 ..< width:
+    spriteBuffer[col] = SpritePixel(priority: 4)
+    windowBuffer[col] = false
   for layer in 0 ..< 4:
     for pixel in layerBuffers[layer].mitems:
       pixel = 0
