@@ -4,7 +4,7 @@ type
     readPos*: int
     writePos*: int
     size*: int
-    sample*: int8  # Current sample being output
+    latch*: int16  # Current sample being output (scaled to -256..256)
     volume*: int  # 0 = 50%, 1 = 100%
     timerSelect*: int  # 0 or 1 (which timer triggers this channel)
     enabled*: bool
@@ -14,7 +14,7 @@ proc newFIFOChannel*(): FIFOChannel =
   result.readPos = 0
   result.writePos = 0
   result.size = 0
-  result.sample = 0
+  result.latch = 0
   result.volume = 0
   result.timerSelect = 0
   result.enabled = false
@@ -37,25 +37,25 @@ proc reset*(fifo: FIFOChannel) =
   fifo.readPos = 0
   fifo.writePos = 0
   fifo.size = 0
-  fifo.sample = 0
+  fifo.latch = 0
 
 proc timerOverflow*(fifo: FIFOChannel) =
   # Called when the selected timer overflows
-  # Pop a sample from FIFO and output it
+  # Pop a sample from FIFO and output it (scaled by 2)
   if fifo.size > 0:
-    fifo.sample = fifo.pop()
+    fifo.latch = fifo.pop().int16 shl 1  # Scale from -128..127 to -256..254
+  else:
+    fifo.latch = 0
 
 proc needsRefill*(fifo: FIFOChannel): bool =
   # Request DMA refill when FIFO has 16 or fewer bytes
   fifo.size <= 16
 
-proc getAmplitude*(fifo: FIFOChannel): float32 =
+proc getAmplitude*(fifo: FIFOChannel): int16 =
+  # Returns latch value in range -256..256 (before volume shift)
   if not fifo.enabled:
-    return 0.0
-
-  # Volume is either 50% or 100%
-  let volumeMultiplier = if fifo.volume == 0: 0.5 else: 1.0
-  float32(fifo.sample) / 128.0 * volumeMultiplier
+    return 0
+  return fifo.latch
 
 proc write32*(fifo: FIFOChannel, value: uint32) =
   # Write 4 bytes to FIFO (called by DMA)

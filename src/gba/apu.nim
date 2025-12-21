@@ -68,24 +68,33 @@ proc getSample(apu: APU): proc() =
   proc callback() =
     apu.gba.scheduler.schedule(samplePeriod, apu.getSample(), EventType.apu)
 
-    # Mix all channels
-    var sample: float32 = 0.0
+    # Mix PSG channels (float for now, should be int16)
+    var psgSample = Channel1(apu.channel1).getAmplitude() +
+                    Channel2(apu.channel2).getAmplitude() +
+                    Channel3(apu.channel3).getAmplitude() +
+                    Channel4(apu.channel4).getAmplitude()
 
-    # PSG channels (divide by 4 to account for all channels)
-    sample += Channel1(apu.channel1).getAmplitude() * 0.25
-    sample += Channel2(apu.channel2).getAmplitude() * 0.25
-    sample += Channel3(apu.channel3).getAmplitude() * 0.25
-    sample += Channel4(apu.channel4).getAmplitude() * 0.25
+    # Apply PSG volume scaling: shift right by (5 - psgVolume)
+    # psgVolume is 0-3, so shift is 5-2 = 3 to 5-0 = 5
+    psgSample = psgSample * float32(apu.psgVolumeLeft + apu.psgVolumeRight) / float32(14 * (1 shl (5 - apu.psgVolume)))
 
-    # Direct Sound channels
-    sample += FIFOChannel(apu.fifoA).getAmplitude() * 0.5
-    sample += FIFOChannel(apu.fifoB).getAmplitude() * 0.5
+    # Mix DMA/FIFO channels with volume scaling
+    var dmaA = FIFOChannel(apu.fifoA).getAmplitude().int32
+    var dmaB = FIFOChannel(apu.fifoB).getAmplitude().int32
 
-    # Apply master volume (simplified)
-    sample *= 0.5
+    # Apply FIFO volume: shift left by volume bit (0=none, 1=shift left 1)
+    dmaA = dmaA shl FIFOChannel(apu.fifoA).volume
+    dmaB = dmaB shl FIFOChannel(apu.fifoB).volume
+
+    # Combine PSG and DMA (convert PSG float to match DMA scale)
+    let totalSample = (psgSample * 512.0).int32 + dmaA + dmaB
+
+    # Apply bias, clamp, remove bias (this centers and prevents clipping)
+    let biased = (totalSample + apu.soundBias.int32).clamp(0'i32, 0x3FF'i32)
+    let finalSample = (biased - apu.soundBias.int32).float32 * 32.0 / 1024.0
 
     bufferPos += 1
-    resample.write(sample)
+    resample.write(finalSample)
 
     if bufferPos >= bufferSize:
       when defined(emscripten):
