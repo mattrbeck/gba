@@ -68,36 +68,39 @@ proc getSample(apu: APU): proc() =
   proc callback() =
     apu.gba.scheduler.schedule(samplePeriod, apu.getSample(), EventType.apu)
 
-    # Mix all channels
-    var sample: float32 = 0.0
+    # PSG channels combined (range -0x80..0x80 each)
+    # Note: Simplified - Crystal multiplies each channel by per-channel left/right enables
+    let psgSound = (Channel1(apu.channel1).getAmplitude() +
+                    Channel2(apu.channel2).getAmplitude() +
+                    Channel3(apu.channel3).getAmplitude() +
+                    Channel4(apu.channel4).getAmplitude()) * 128.0  # Scale to int range
 
-    # PSG channels (divide by 4 to account for all channels)
-    sample += Channel1(apu.channel1).getAmplitude() * 0.25
-    sample += Channel2(apu.channel2).getAmplitude() * 0.25
-    sample += Channel3(apu.channel3).getAmplitude() * 0.25
-    sample += Channel4(apu.channel4).getAmplitude() * 0.25
+    # PSG scaled to -0x200..0x200 range with master volume
+    let psgLeft = ((psgSound.int32 * apu.psgVolumeLeft.int32) shr (5 - apu.psgVolume))
+    let psgRight = ((psgSound.int32 * apu.psgVolumeRight.int32) shr (5 - apu.psgVolume))
 
-    # Direct Sound channels - get raw latch values (-256..256)
+    # DMA channels at -0x100..0x100 scale
     var dmaA = FIFOChannel(apu.fifoA).getAmplitude().int32
     var dmaB = FIFOChannel(apu.fifoB).getAmplitude().int32
 
-    # Apply FIFO volume by shifting (0 = no shift, 1 = shift left 1)
+    # DMA amplified to -0x200..0x200 range
     dmaA = dmaA shl FIFOChannel(apu.fifoA).volume
     dmaB = dmaB shl FIFOChannel(apu.fifoB).volume
 
-    # Mix DMA channels with left/right routing
-    # Note: Simplified to mono for now, proper stereo would need separate left/right buffers
-    let dmaAEnabled = if FIFOChannel(apu.fifoA).enableLeft or FIFOChannel(apu.fifoA).enableRight: 1.0 else: 0.0
-    let dmaBEnabled = if FIFOChannel(apu.fifoB).enableLeft or FIFOChannel(apu.fifoB).enableRight: 1.0 else: 0.0
+    # DMA stereo routing (multiply by 0 or 1 based on enable flags)
+    let dmaLeft = dmaA * (if FIFOChannel(apu.fifoA).enableLeft: 1 else: 0).int32 +
+                  dmaB * (if FIFOChannel(apu.fifoB).enableLeft: 1 else: 0).int32
+    let dmaRight = dmaA * (if FIFOChannel(apu.fifoA).enableRight: 1 else: 0).int32 +
+                   dmaB * (if FIFOChannel(apu.fifoB).enableRight: 1 else: 0).int32
 
-    sample += (dmaA.float32 / 512.0) * dmaAEnabled * 0.5
-    sample += (dmaB.float32 / 512.0) * dmaBEnabled * 0.5
+    # Final mixing: add bias, clamp to 10-bit range, remove bias
+    let totalLeft = ((psgLeft + dmaLeft + apu.soundBias.int32).clamp(0'i32, 0x3FF'i32) - apu.soundBias.int32).float32 * 32.0
+    let totalRight = ((psgRight + dmaRight + apu.soundBias.int32).clamp(0'i32, 0x3FF'i32) - apu.soundBias.int32).float32 * 32.0
 
-    # Apply master volume (simplified)
-    sample *= 0.5
-
-    bufferPos += 1
-    resample.write(sample)
+    # Write stereo samples
+    resample.write(totalLeft)
+    resample.write(totalRight)
+    bufferPos += 2  # Two samples per stereo frame
 
     if bufferPos >= bufferSize:
       when defined(emscripten):
