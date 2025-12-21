@@ -94,13 +94,14 @@ proc getSample(apu: APU): proc() =
                    dmaB * (if FIFOChannel(apu.fifoB).enableRight: 1 else: 0).int32
 
     # Final mixing: add bias, clamp to 10-bit range, remove bias
-    let totalLeft = ((psgLeft + dmaLeft + apu.soundBias.int32).clamp(0'i32, 0x3FF'i32) - apu.soundBias.int32).float32 * 32.0
-    let totalRight = ((psgRight + dmaRight + apu.soundBias.int32).clamp(0'i32, 0x3FF'i32) - apu.soundBias.int32).float32 * 32.0
+    let totalLeft = ((psgLeft + dmaLeft + apu.soundBias.int32).clamp(0'i32, 0x3FF'i32) - apu.soundBias.int32).float32
+    let totalRight = ((psgRight + dmaRight + apu.soundBias.int32).clamp(0'i32, 0x3FF'i32) - apu.soundBias.int32).float32
 
-    # Write stereo samples
-    resample.write(totalLeft)
-    resample.write(totalRight)
-    bufferPos += 2  # Two samples per stereo frame
+    # Combine left and right to mono for now (divide by 2, multiply by 32 for final scale)
+    let monoSample = (totalLeft + totalRight) * 16.0
+
+    bufferPos += 1
+    resample.write(monoSample)
 
     if bufferPos >= bufferSize:
       when defined(emscripten):
