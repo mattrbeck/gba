@@ -68,33 +68,36 @@ proc getSample(apu: APU): proc() =
   proc callback() =
     apu.gba.scheduler.schedule(samplePeriod, apu.getSample(), EventType.apu)
 
-    # Mix PSG channels (float for now, should be int16)
-    var psgSample = Channel1(apu.channel1).getAmplitude() +
-                    Channel2(apu.channel2).getAmplitude() +
-                    Channel3(apu.channel3).getAmplitude() +
-                    Channel4(apu.channel4).getAmplitude()
+    # Mix all channels
+    var sample: float32 = 0.0
 
-    # Apply PSG volume scaling: shift right by (5 - psgVolume)
-    # psgVolume is 0-3, so shift is 5-2 = 3 to 5-0 = 5
-    psgSample = psgSample * float32(apu.psgVolumeLeft + apu.psgVolumeRight) / float32(14 * (1 shl (5 - apu.psgVolume)))
+    # PSG channels (divide by 4 to account for all channels)
+    sample += Channel1(apu.channel1).getAmplitude() * 0.25
+    sample += Channel2(apu.channel2).getAmplitude() * 0.25
+    sample += Channel3(apu.channel3).getAmplitude() * 0.25
+    sample += Channel4(apu.channel4).getAmplitude() * 0.25
 
-    # Mix DMA/FIFO channels with volume scaling
+    # Direct Sound channels - get raw latch values (-256..256)
     var dmaA = FIFOChannel(apu.fifoA).getAmplitude().int32
     var dmaB = FIFOChannel(apu.fifoB).getAmplitude().int32
 
-    # Apply FIFO volume: shift left by volume bit (0=none, 1=shift left 1)
+    # Apply FIFO volume by shifting (0 = no shift, 1 = shift left 1)
     dmaA = dmaA shl FIFOChannel(apu.fifoA).volume
     dmaB = dmaB shl FIFOChannel(apu.fifoB).volume
 
-    # Combine PSG and DMA (convert PSG float to match DMA scale)
-    let totalSample = (psgSample * 512.0).int32 + dmaA + dmaB
+    # Mix DMA channels with left/right routing
+    # Note: Simplified to mono for now, proper stereo would need separate left/right buffers
+    let dmaAEnabled = if FIFOChannel(apu.fifoA).enableLeft or FIFOChannel(apu.fifoA).enableRight: 1.0 else: 0.0
+    let dmaBEnabled = if FIFOChannel(apu.fifoB).enableLeft or FIFOChannel(apu.fifoB).enableRight: 1.0 else: 0.0
 
-    # Apply bias, clamp, remove bias (this centers and prevents clipping)
-    let biased = (totalSample + apu.soundBias.int32).clamp(0'i32, 0x3FF'i32)
-    let finalSample = (biased - apu.soundBias.int32).float32 * 32.0 / 1024.0
+    sample += (dmaA.float32 / 512.0) * dmaAEnabled * 0.5
+    sample += (dmaB.float32 / 512.0) * dmaBEnabled * 0.5
+
+    # Apply master volume (simplified)
+    sample *= 0.5
 
     bufferPos += 1
-    resample.write(finalSample)
+    resample.write(sample)
 
     if bufferPos >= bufferSize:
       when defined(emscripten):
@@ -195,10 +198,12 @@ proc `[]`*(apu: APU, address: uint32): uint8 =
     (FIFOChannel(apu.fifoA).volume.uint8 shl 2) or
     (FIFOChannel(apu.fifoB).volume.uint8 shl 3)
   of 0x83:  # SOUNDCNT_H high
-    (if FIFOChannel(apu.fifoA).enabled: 0x01 else: 0x00).uint8 or
-    (if FIFOChannel(apu.fifoB).enabled: 0x02 else: 0x00) or
+    (if FIFOChannel(apu.fifoA).enableRight: 0x01 else: 0x00).uint8 or
+    (if FIFOChannel(apu.fifoA).enableLeft: 0x02 else: 0x00) or
     (FIFOChannel(apu.fifoA).timerSelect.uint8 shl 2) or
-    (FIFOChannel(apu.fifoB).timerSelect.uint8 shl 3)
+    (if FIFOChannel(apu.fifoB).enableRight: 0x10 else: 0x00) or
+    (if FIFOChannel(apu.fifoB).enableLeft: 0x20 else: 0x00) or
+    (FIFOChannel(apu.fifoB).timerSelect.uint8 shl 6)
 
   of 0x84:  # SOUNDCNT_X
     (if apu.psgMasterEnable: 0x80 else: 0x00).uint8 or
@@ -258,12 +263,14 @@ proc `[]=`*(apu: APU, address: uint32, value: uint8) =
     FIFOChannel(apu.fifoA).volume = int((value shr 2) and 0x01)
     FIFOChannel(apu.fifoB).volume = int((value shr 3) and 0x01)
   of 0x83:  # SOUNDCNT_H high
-    FIFOChannel(apu.fifoA).enabled = (value and 0x01) != 0
-    FIFOChannel(apu.fifoB).enabled = (value and 0x02) != 0
+    FIFOChannel(apu.fifoA).enableRight = (value and 0x01) != 0
+    FIFOChannel(apu.fifoA).enableLeft = (value and 0x02) != 0
     FIFOChannel(apu.fifoA).timerSelect = int((value shr 2) and 0x01)
-    FIFOChannel(apu.fifoB).timerSelect = int((value shr 3) and 0x01)
     if (value and 0x08) != 0: FIFOChannel(apu.fifoA).reset()
-    if (value and 0x10) != 0: FIFOChannel(apu.fifoB).reset()
+    FIFOChannel(apu.fifoB).enableRight = (value and 0x10) != 0
+    FIFOChannel(apu.fifoB).enableLeft = (value and 0x20) != 0
+    FIFOChannel(apu.fifoB).timerSelect = int((value shr 6) and 0x01)
+    if (value and 0x80) != 0: FIFOChannel(apu.fifoB).reset()
 
   of 0x84:  # SOUNDCNT_X
     apu.psgMasterEnable = (value and 0x80) != 0

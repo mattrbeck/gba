@@ -5,9 +5,10 @@ type
     writePos*: int
     size*: int
     latch*: int16  # Current sample being output (scaled to -256..256)
-    volume*: int  # 0 = 50%, 1 = 100%
+    volume*: int  # 0 = 50%, 1 = 100% (used as shift amount)
     timerSelect*: int  # 0 or 1 (which timer triggers this channel)
-    enabled*: bool
+    enableRight*: bool  # Route to right speaker
+    enableLeft*: bool   # Route to left speaker
 
 proc newFIFOChannel*(): FIFOChannel =
   new result
@@ -17,7 +18,8 @@ proc newFIFOChannel*(): FIFOChannel =
   result.latch = 0
   result.volume = 0
   result.timerSelect = 0
-  result.enabled = false
+  result.enableRight = false
+  result.enableLeft = false
 
 proc push*(fifo: FIFOChannel, value: int8) =
   if fifo.size < 32:
@@ -53,8 +55,6 @@ proc needsRefill*(fifo: FIFOChannel): bool =
 
 proc getAmplitude*(fifo: FIFOChannel): int16 =
   # Returns latch value in range -256..256 (before volume shift)
-  if not fifo.enabled:
-    return 0
   return fifo.latch
 
 proc write32*(fifo: FIFOChannel, value: uint32) =
