@@ -1,0 +1,44 @@
+<div>
+  <button type="button" id="open-bios">Open BIOS</button>
+  <button type="button" id="open-rom">Open ROM</button>
+  <div id="fps"></div>
+</div>
+<div style="position: relative; z-index: 1; height: 100%">
+  <img src="https://images-na.ssl-images-amazon.com/images/I/91WO9VINoSL._SL1500_.jpg" style="position: absolute; z-index: 2; height: 300px" />
+  <style>
+    span {
+      color: red
+    }
+
+    .noselect {
+      -webkit-touch-callout: none;
+      /* iOS Safari */
+      -webkit-user-select: none;
+      /* Safari */
+      -khtml-user-select: none;
+      /* Konqueror HTML */
+      -moz-user-select: none;
+      /* Old versions of Firefox */
+      -ms-user-select: none;
+      /* Internet Explorer/Edge */
+      user-select: none;
+      /* Non-prefixed version, currently
+                                  supported by Chrome, Edge, Opera and Firefox */
+    }
+
+  </style>
+  <span class="noselect" id="overlay_text" style="position: absolute; top: 191px; z-index: 3; left: 20px" onclick="console.log('←'); ; pressButton(Button.LEFT)">←</span>
+  <span class="noselect" id="overlay_text" style="position: absolute; top: 191px; z-index: 3; left: 45px" onclick="console.log('→'); ; pressButton(Button.RIGHT)">→</span>
+  <span class="noselect" id="overlay_text" style="position: absolute; top: 175px; z-index: 3; left: 36px" onclick="console.log('↑'); ; pressButton(Button.UP)">↑</span>
+  <span class="noselect" id="overlay_text" style="position: absolute; top: 205px; z-index: 3; left: 36px" onclick="console.log('↓'); ; pressButton(Button.DOWN)">↓</span>
+  <span class="noselect" id="overlay_text" style="position: absolute; top: 198px; z-index: 3; left: 123px" onclick="console.log('b'); pressButton(Button.B)">b</span>
+  <span class="noselect" id="overlay_text" style="position: absolute; top: 187px; z-index: 3; left: 155px" onclick="console.log('a'); pressButton(Button.A)">a</span>
+  <span class="noselect" id="overlay_text" style="position: absolute; top: 244px; z-index: 3; left: 65px; font-size: 13px;" onclick="console.log('select'); pressButton(Button.SELECT)">select</span>
+  <span class="noselect" id="overlay_text" style="position: absolute; top: 244px; z-index: 3; left: 97px; font-size: 13px;" onclick="console.log('start'); pressButton(Button.START)">start</span>
+  <img class="noselect" style="position: absolute
+  ; top: 80px; z-index: 3; left: 16.5px" width=20px src="https://i.imgur.com/7sAvEy0.png">
+  <canvas style="position: absolute; z-index: 4; left: 38px; top: 34px; width: 112px; height: 102px"  id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+</div>
+<div id="output"></div>
+<script src="david.js"></script>
+<script src="em.js"></script>
